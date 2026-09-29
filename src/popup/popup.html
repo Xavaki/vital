@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Vital</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="p-head">
+    <div class="eyebrow">
+      <span id="readout-label">Time left today</span>
+      <span>resets 00:00</span>
+    </div>
+    <div id="readout" class="readout">–:––</div>
+    <div id="used" class="used"></div>
+    <div id="meter" class="meter" role="img"></div>
+    <div id="live" class="live" hidden>
+      <span class="dot" aria-hidden="true"></span>
+      <span>Counting · <span id="live-host"></span></span>
+    </div>
+  </header>
+
+  <div id="paused-banner" class="paused-banner" hidden>
+    Paused — not counting, no warnings
+  </div>
+
+  <section class="visits">
+    <h2 class="eyebrow">Recent visits</h2>
+    <ul id="visit-list" class="visit-list"></ul>
+    <p id="visit-empty" class="empty" hidden>No visits yet.</p>
+  </section>
+
+  <footer class="p-foot">
+    <label class="pause">
+      <input id="pause-toggle" type="checkbox" />
+      <span class="slider"></span>
+      <span class="pause-label">Pause</span>
+    </label>
+    <div class="foot-links">
+      <button id="manage" type="button" class="link">Settings</button>
+      <button id="menu-btn" type="button" class="link" aria-haspopup="true">Data…</button>
+    </div>
+  </footer>
+
+  <div id="menu" class="menu" hidden role="menu">
+    <button id="clear-history" type="button" role="menuitem">Clear visit history</button>
+    <button id="reset-today" type="button" role="menuitem" class="danger">Reset today's time</button>
+  </div>
+
+  <div id="confirm" class="confirm" hidden>
+    <p id="confirm-text"></p>
+    <div class="confirm-actions">
+      <button id="confirm-cancel" type="button" class="link">Cancel</button>
+      <button id="confirm-ok" type="button" class="danger-btn">Confirm</button>
+    </div>
+  </div>
+
+  <script src="../shared/config.js"></script>
+  <script src="../shared/usage.js"></script>
+  <script src="../shared/storage.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

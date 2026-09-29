@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Vital",
+  "version": "0.1.0",
+  "description": "A daily time allowance for distracting sites. Only time with the site in front counts. Nothing is blocked; all data stays on your device.",
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vital@xavaki.local",
+      "strict_min_version": "128.0"
+    }
+  },
+
+  "permissions": [
+    "storage",
+    "tabs",
+    "alarms",
+    "scripting"
+  ],
+
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+
+  "background": {
+    "scripts": [
+      "src/shared/config.js",
+      "src/shared/usage.js",
+      "src/shared/matcher.js",
+      "src/shared/storage.js",
+      "src/background/visits.js"
+    ]
+  },
+
+  "action": {
+    "default_title": "Vital",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon.svg",
+      "32": "icons/icon.svg"
+    },
+    "theme_icons": [
+      { "light": "icons/icon-light.svg", "dark": "icons/icon.svg", "size": 16 },
+      { "light": "icons/icon-light.svg", "dark": "icons/icon.svg", "size": 32 }
+    ]
+  },
+
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+
+  "icons": {
+    "48": "icons/icon.svg",
+    "96": "icons/icon.svg"
+  }
+}

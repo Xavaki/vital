@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Vital — Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <h1>
+        <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
+          <rect x="1.25" y="4.25" width="11.5" height="7.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <rect x="13.25" y="6.5" width="1.5" height="3" rx="0.5" fill="currentColor"/>
+          <rect x="3" y="6" width="2.25" height="4" fill="currentColor"/>
+          <rect x="5.9" y="6" width="2.25" height="4" fill="currentColor"/>
+          <rect x="8.8" y="6" width="2.25" height="4" fill="currentColor"/>
+        </svg>
+        Vital
+      </h1>
+      <p class="tagline">A daily time allowance for distracting sites. Only time with the site in front counts. Nothing is ever blocked.</p>
+    </header>
+
+    <!-- Daily allowance ----------------------------------------------- -->
+    <section class="card" aria-labelledby="allowance-h">
+      <h2 id="allowance-h">Daily allowance</h2>
+      <label for="allowance-input" class="field-label">Time per day on watchlisted sites</label>
+      <div class="allowance-row">
+        <input id="allowance-input" type="number" inputmode="numeric" step="1" />
+        <span class="unit">minutes</span>
+        <span id="allowance-hint" class="allowance-hint" role="status" aria-live="polite"></span>
+      </div>
+      <p class="help small">Shared across all watchlisted sites. Changes apply immediately, including to today.</p>
+    </section>
+
+    <!-- Watchlist ------------------------------------------------------ -->
+    <section class="card" aria-labelledby="watchlist-h">
+      <h2 id="watchlist-h">Watchlist</h2>
+
+      <form id="add-form" class="add-form" autocomplete="off">
+        <label for="site-input" class="field-label">Add a site</label>
+        <div class="add-row">
+          <input
+            id="site-input"
+            type="text"
+            inputmode="url"
+            placeholder="example.com or a pasted URL"
+            aria-describedby="add-preview add-help"
+          />
+          <button id="add-btn" type="submit" disabled>Add</button>
+        </div>
+
+        <label class="subcheck">
+          <input id="exact-host" type="checkbox" />
+          Match this exact host only (don't include subdomains)
+        </label>
+
+        <p id="add-preview" class="preview" role="status" aria-live="polite"></p>
+        <p id="add-help" class="help">
+          Matching is by hostname family: if <code>youtube.com</code> is listed,
+          every http/https page on <code>youtube.com</code>, <code>www.youtube.com</code>,
+          <code>m.youtube.com</code>… counts — but never a lookalike like
+          <code>notyoutube.com</code>. Paths, queries and page contents are ignored.
+        </p>
+      </form>
+
+      <div class="list-tools">
+        <input id="search" type="search" placeholder="Search sites…" aria-label="Search watchlist" />
+      </div>
+
+      <ul id="rule-list" class="rule-list" aria-label="Watchlisted sites"></ul>
+      <p id="empty-state" class="empty" hidden>No sites yet. Add one above to start.</p>
+    </section>
+
+    <!-- Feedback settings --------------------------------------------- -->
+    <section class="card" aria-labelledby="feedback-h">
+      <h2 id="feedback-h">Feedback</h2>
+      <label class="toggle-row">
+        <input id="warning-toggle" type="checkbox" />
+        <span>
+          <strong>In-page warning</strong>
+          <small>A small, dismissible toast asking if you want to close the tab. Auto-hides after five seconds.</small>
+        </span>
+      </label>
+    </section>
+
+    <!-- How time is counted ------------------------------------------ -->
+    <section class="card" aria-labelledby="counting-h">
+      <h2 id="counting-h">How time is counted</h2>
+      <p class="help">
+        Time counts only while a watchlisted site is the <strong>active tab in
+        the focused Firefox window</strong>. Background tabs, other windows and
+        time away from Firefox don't count — music playing in a background tab
+        costs nothing.
+      </p>
+      <p class="help">
+        Every counted second comes off today's allowance, which resets at
+        midnight. Running out blocks nothing; the toolbar badge and popup just
+        show how far over you are.
+      </p>
+    </section>
+
+    <!-- Privacy -------------------------------------------------------- -->
+    <section class="card" aria-labelledby="privacy-h">
+      <h2 id="privacy-h">Privacy</h2>
+      <p class="help">
+        Everything stays on this device. Vital stores hostnames, visit times and
+        per-day totals — never full URLs, page titles, queries or page content.
+        No account, no network requests, no telemetry. Private-browsing windows
+        are not tracked.
+      </p>
+      <p class="help small">See today's time and clear history from the toolbar popup.</p>
+    </section>
+  </main>
+
+  <div id="toast" class="app-toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="../shared/config.js"></script>
+  <script src="../shared/usage.js"></script>
+  <script src="../shared/matcher.js"></script>
+  <script src="../shared/storage.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
