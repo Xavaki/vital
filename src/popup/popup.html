@@ -17,44 +17,33 @@
     <div id="meter" class="meter" role="img"></div>
     <div id="live" class="live" hidden>
       <span class="dot" aria-hidden="true"></span>
-      <span>Counting · <span id="live-host"></span></span>
+      <span><span id="live-state">Counting</span> · <span id="live-host"></span></span>
     </div>
   </header>
 
-  <div id="paused-banner" class="paused-banner" hidden>
-    Paused — not counting, no warnings
-  </div>
+  <section class="history" aria-labelledby="history-h">
+    <h2 id="history-h" class="eyebrow">
+      <span>Last 7 days</span>
+      <span id="week-avg"></span>
+    </h2>
+    <div id="chart" class="chart"></div>
+    <!-- Same numbers as the chart, for screen readers. -->
+    <table id="chart-table" class="sr-only">
+      <caption>Time on watchlisted sites per day, last 7 days</caption>
+      <thead><tr><th scope="col">Day</th><th scope="col">Time</th><th scope="col">Over allowance</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
 
-  <section class="visits">
-    <h2 class="eyebrow">Recent visits</h2>
+  <section class="visits" aria-labelledby="visits-h">
+    <h2 id="visits-h" class="eyebrow">Recent visits</h2>
     <ul id="visit-list" class="visit-list"></ul>
     <p id="visit-empty" class="empty" hidden>No visits yet.</p>
   </section>
 
   <footer class="p-foot">
-    <label class="pause">
-      <input id="pause-toggle" type="checkbox" />
-      <span class="slider"></span>
-      <span class="pause-label">Pause</span>
-    </label>
-    <div class="foot-links">
-      <button id="manage" type="button" class="link">Settings</button>
-      <button id="menu-btn" type="button" class="link" aria-haspopup="true">Data…</button>
-    </div>
+    <button id="manage" type="button" class="link">Settings</button>
   </footer>
-
-  <div id="menu" class="menu" hidden role="menu">
-    <button id="clear-history" type="button" role="menuitem">Clear visit history</button>
-    <button id="reset-today" type="button" role="menuitem" class="danger">Reset today's time</button>
-  </div>
-
-  <div id="confirm" class="confirm" hidden>
-    <p id="confirm-text"></p>
-    <div class="confirm-actions">
-      <button id="confirm-cancel" type="button" class="link">Cancel</button>
-      <button id="confirm-ok" type="button" class="danger-btn">Confirm</button>
-    </div>
-  </div>
 
   <script src="../shared/config.js"></script>
   <script src="../shared/usage.js"></script>

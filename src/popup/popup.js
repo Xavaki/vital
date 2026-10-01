@@ -1,8 +1,7 @@
 /*
- * Vital — popup: time left today (live), recent visits, pause & data controls.
- * Reads storage directly and recomputes the countdown every second while a
- * visit is open; the background records time and handles pause via
- * storage.onChanged.
+ * Vital — popup: time left today (live), a 7-day history chart and recent
+ * visits. Reads storage directly and recomputes the live numbers
+ * every second while a visit is open; the background does all recording.
  */
 (function () {
   "use strict";
@@ -15,11 +14,13 @@
     closed: "closed",
     focused_away: "switched away",
     navigated: "navigated away",
-    paused: "paused",
+    paused: "paused", // outcome from earlier versions
     interrupted: "interrupted",
   };
+  const DAYS = 7;
+  const PLOT_H = 88; // px; the chart container adds the x-axis band below
 
-  // Latest storage snapshot; the header re-renders from it every second.
+  // Latest storage snapshot; live parts re-render from it every second.
   let snap = { usage: {}, openVisit: null, settings: storage.DEFAULT_SETTINGS };
 
   function fmtTime(ts) {
@@ -34,8 +35,7 @@
 
   // ---- Header: countdown + meter ---------------------------------------
 
-  function renderHeader() {
-    const now = Date.now();
+  function renderHeader(now) {
     const allowance = U.allowanceMs(snap.settings);
     const used = U.usedTodayMs(snap.usage, snap.openVisit, now);
     const left = allowance - used;
@@ -48,9 +48,16 @@
     $("used").textContent = `${U.fmtClock(used)} used of ${U.fmtClock(allowance)}`;
     renderMeter(Math.max(0, left) / allowance, over || low);
 
-    const live = !!snap.openVisit && !snap.settings.paused;
+    const live = !!snap.openVisit;
     $("live").hidden = !live;
-    if (live) $("live-host").textContent = snap.openVisit.host;
+    if (live) {
+      // During the grace period countedUntil is still in the future.
+      const graceLeft = snap.openVisit.countedUntil - now;
+      const inGrace = graceLeft > 0 && !snap.openVisit.activeMs;
+      $("live").classList.toggle("grace", inGrace);
+      $("live-state").textContent = inGrace ? `Grace ${Math.ceil(graceLeft / 1000)}s` : "Counting";
+      $("live-host").textContent = snap.openVisit.host;
+    }
   }
 
   // Ten segments, each a tenth of the allowance; the current one fills partly.
@@ -76,22 +83,179 @@
     });
   }
 
-  // ---- Full render ------------------------------------------------------
+  // ---- History chart: last 7 days --------------------------------------
+  // One column per day: time within the allowance in ink, any overage stacked
+  // on top in the signal color (2px surface gap between). A solid hairline
+  // marks the current allowance. Only today's column carries a value label;
+  // every column has a hover/focus tooltip, and a hidden table mirrors it all.
 
-  async function render() {
-    const [usage, openVisit, settings, visits] = await Promise.all([
-      storage.getUsage(),
-      storage.getOpenVisit(),
-      storage.getSettings(),
-      storage.getVisits(),
-    ]);
-    snap = { usage, openVisit, settings };
-    renderHeader();
+  let chart = null; // cached DOM, built once
+  let activeIdx = null; // column whose tooltip is showing
 
-    $("pause-toggle").checked = settings.paused;
-    $("paused-banner").hidden = !settings.paused;
+  function lastDays(now) {
+    const d = new Date(now);
+    return Array.from({ length: DAYS }, (_, i) => {
+      // Noon avoids DST edges when stepping back whole days.
+      const day = new Date(d.getFullYear(), d.getMonth(), d.getDate() - (DAYS - 1 - i), 12);
+      return { ts: day.getTime(), key: U.dateKey(day.getTime()), isToday: i === DAYS - 1 };
+    });
+  }
 
-    const recent = [...visits].sort((a, b) => b.startedAt - a.startedAt).slice(0, 12);
+  function buildChart() {
+    const root = $("chart");
+    root.style.setProperty("--plot-h", `${PLOT_H}px`);
+
+    const plot = document.createElement("div");
+    plot.className = "plot";
+    const limit = document.createElement("div");
+    limit.className = "limit";
+    const limitLabel = document.createElement("span");
+    limitLabel.className = "limit-label";
+    limit.append(limitLabel);
+    plot.append(limit);
+
+    const cols = [];
+    const axis = document.createElement("div");
+    axis.className = "axis";
+    for (let i = 0; i < DAYS; i++) {
+      const col = document.createElement("div");
+      col.className = "col";
+      col.tabIndex = 0;
+      col.setAttribute("role", "img");
+      const stack = document.createElement("div");
+      stack.className = "stack";
+      const overSeg = document.createElement("span");
+      overSeg.className = "over";
+      const withinSeg = document.createElement("span");
+      withinSeg.className = "within";
+      const value = document.createElement("span");
+      value.className = "value";
+      stack.append(value, overSeg, withinSeg);
+      col.append(stack);
+      plot.append(col);
+
+      const label = document.createElement("span");
+      axis.append(label);
+
+      col.addEventListener("pointerenter", () => showTip(i));
+      col.addEventListener("focus", () => showTip(i));
+      col.addEventListener("pointerleave", hideTip);
+      col.addEventListener("blur", hideTip);
+      cols.push({ col, overSeg, withinSeg, value, label });
+    }
+
+    const tip = document.createElement("div");
+    tip.className = "tip";
+    tip.hidden = true;
+    const tipValue = document.createElement("strong");
+    const tipDay = document.createElement("span");
+    const tipOver = document.createElement("span");
+    tipOver.className = "tip-over";
+    tip.append(tipValue, tipDay, tipOver);
+
+    root.replaceChildren(plot, axis, tip);
+    chart = { plot, limit, limitLabel, cols, tip, tipValue, tipDay, tipOver, days: [] };
+  }
+
+  function renderChart(now) {
+    if (!chart) buildChart();
+    const allowance = U.allowanceMs(snap.settings);
+    const days = lastDays(now).map((d) => ({
+      ...d,
+      used: d.isToday ? U.usedTodayMs(snap.usage, snap.openVisit, now) : snap.usage[d.key] || 0,
+    }));
+    chart.days = days;
+
+    // Headroom above the tallest mark (or the allowance line) for today's label.
+    const yMax = Math.max(allowance, ...days.map((d) => d.used)) * 1.18;
+    const px = (ms) => (ms / yMax) * PLOT_H;
+
+    chart.limit.style.bottom = `${px(allowance)}px`;
+    chart.limitLabel.textContent = U.fmtShort(allowance);
+
+    days.forEach((d, i) => {
+      const c = chart.cols[i];
+      const within = Math.min(d.used, allowance);
+      const over = Math.max(0, d.used - allowance);
+      // Keep any non-zero day visible as at least a 2px stub.
+      const withinH = within > 0 ? Math.max(2, px(within)) : 0;
+      const overH = over > 0 ? Math.max(2, px(over)) : 0;
+      c.withinSeg.style.height = `${withinH}px`;
+      c.overSeg.style.height = `${overH}px`;
+      c.overSeg.hidden = overH === 0;
+      c.col.classList.toggle("has-over", overH > 0);
+      c.col.classList.toggle("today", d.isToday);
+      c.value.textContent = d.isToday && d.used > 0 ? U.fmtShort(d.used) : "";
+
+      const dayName = d.isToday
+        ? "Today"
+        : new Date(d.ts).toLocaleDateString([], { weekday: "short" });
+      c.label.textContent = dayName;
+      c.label.classList.toggle("today", d.isToday);
+      c.col.setAttribute(
+        "aria-label",
+        `${dayName}: ${U.fmtShort(d.used)}${over > 0 ? `, ${U.fmtShort(over)} over` : ""}`
+      );
+    });
+
+    const total = days.reduce((sum, d) => sum + d.used, 0);
+    $("week-avg").textContent = `avg ${U.fmtShort(total / DAYS)}/day`;
+    renderTable(days, allowance);
+    if (activeIdx !== null) showTip(activeIdx);
+  }
+
+  function showTip(i) {
+    activeIdx = i;
+    const d = chart.days[i];
+    if (!d) return;
+    const allowance = U.allowanceMs(snap.settings);
+    const over = Math.max(0, d.used - allowance);
+    chart.tipValue.textContent = fmtDuration(d.used);
+    chart.tipDay.textContent = new Date(d.ts).toLocaleDateString([], {
+      weekday: "short", day: "numeric", month: "short",
+    });
+    chart.tipOver.textContent = over > 0 ? `${U.fmtShort(over)} over` : "";
+    chart.tipOver.hidden = over === 0;
+    chart.tip.hidden = false;
+
+    // Center over the column, clamped inside the chart. Columns sit inside the
+    // offset plot, so measure against the chart's own box.
+    const root = $("chart").getBoundingClientRect();
+    const col = chart.cols[i].col.getBoundingClientRect();
+    const tipW = chart.tip.offsetWidth;
+    const center = col.left - root.left + col.width / 2;
+    const left = Math.min(Math.max(0, center - tipW / 2), root.width - tipW);
+    chart.tip.style.left = `${left}px`;
+    chart.cols.forEach((c, j) => c.col.classList.toggle("active", j === i));
+  }
+  function hideTip() {
+    activeIdx = null;
+    if (!chart) return;
+    chart.tip.hidden = true;
+    chart.cols.forEach((c) => c.col.classList.remove("active"));
+  }
+
+  function renderTable(days, allowance) {
+    const rows = days.map((d) => {
+      const tr = document.createElement("tr");
+      for (const text of [
+        new Date(d.ts).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" }),
+        fmtDuration(d.used),
+        d.used > allowance ? fmtDuration(d.used - allowance) : "—",
+      ]) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        tr.append(td);
+      }
+      return tr;
+    });
+    $("chart-table").tBodies[0].replaceChildren(...rows);
+  }
+
+  // ---- Recent visits ----------------------------------------------------
+
+  function renderVisits(visits) {
+    const recent = [...visits].sort((a, b) => b.startedAt - a.startedAt).slice(0, 8);
     const list = $("visit-list");
     list.replaceChildren();
     $("visit-empty").hidden = recent.length !== 0;
@@ -104,58 +268,54 @@
       host.className = "visit-host";
       host.textContent = v.host;
 
+      const dur = document.createElement("div");
+      dur.className = "visit-dur" + ((v.activeMs || 0) < 1000 ? " zero" : "");
+      dur.textContent = fmtDuration(v.activeMs || 0);
+
       const sub = document.createElement("div");
       sub.className = "visit-sub";
       sub.textContent = `${fmtTime(v.startedAt)} · ${OUTCOME_LABEL[v.outcome] || v.outcome}`;
 
-      const dur = document.createElement("div");
-      dur.className = "visit-dur" + (v.activeMs < 1000 ? " zero" : "");
-      dur.textContent = fmtDuration(v.activeMs);
-
-      li.append(host, sub, dur);
+      li.append(host, dur, sub);
       list.append(li);
     }
   }
 
-  // ---- Controls ---------------------------------------------------------
+  // ---- Full render ------------------------------------------------------
 
-  $("pause-toggle").addEventListener("change", async (e) => {
-    // The background sees the settings change and ends any open visit.
-    await storage.setSettings({ paused: e.target.checked });
-  });
+  async function render() {
+    const [usage, openVisit, settings, visits] = await Promise.all([
+      storage.getUsage(),
+      storage.getOpenVisit(),
+      storage.getSettings(),
+      storage.getVisits(),
+    ]);
+    snap = { usage, openVisit, settings };
+    const now = Date.now();
+    renderHeader(now);
+    renderChart(now);
+    renderVisits(visits);
+  }
+
+  // ---- Controls ---------------------------------------------------------
 
   $("manage").addEventListener("click", () => {
     browserApi.runtime.openOptionsPage();
     window.close();
   });
 
-  const menu = $("menu");
-  $("menu-btn").addEventListener("click", () => { menu.hidden = !menu.hidden; });
 
-  function confirmAction(text, onOk) {
-    const box = $("confirm");
-    $("confirm-text").textContent = text;
-    box.hidden = false;
-    menu.hidden = true;
-    $("confirm-ok").onclick = async () => { await onOk(); box.hidden = true; render(); };
-    $("confirm-cancel").onclick = () => { box.hidden = true; };
-  }
-
-  $("clear-history").addEventListener("click", () => {
-    confirmAction("Delete the visit list? Today's time and your watchlist stay.", () =>
-      storage.clearHistory()
-    );
-  });
-  $("reset-today").addEventListener("click", () => {
-    confirmAction("Reset the time used today back to zero?", () => storage.resetToday());
-  });
-
-  // Live updates: storage changes re-render; the countdown ticks every second.
+  // Live updates: storage changes re-render; live numbers tick every second.
   browserApi.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes.usage || changes.openVisit || changes.visits || changes.settings) render();
   });
-  setInterval(() => { if (snap.openVisit) renderHeader(); }, 1000);
+  setInterval(() => {
+    if (!snap.openVisit) return;
+    const now = Date.now();
+    renderHeader(now);
+    renderChart(now);
+  }, 1000);
 
   render();
 })();

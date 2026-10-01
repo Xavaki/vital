@@ -17,11 +17,15 @@ The spec's point rewards and penalties have been replaced by a time allowance:
   watchlisted sites). Changes apply immediately, including to today.
 - **What counts:** foreground time only — the site's tab is active *and* its
   window is focused. Background tabs (e.g. music), other windows, and time away
-  from Firefox never count. Pausing stops counting.
+  from Firefox never count. There is no pause or manual reset — the only
+  way to get more time today is to raise the allowance.
+- **Grace period:** the first `graceMs` (4 s) of every visit are free, so
+  closing a tab opened out of habit costs nothing. Counting starts when the
+  in-page toast disappears.
 - **Day boundary:** usage is stored per local day; a visit spanning midnight is
   split between the two days.
-- **Over the allowance:** nothing is blocked; the badge, popup and toast show
-  how far over you are, in the signal color.
+- **Over the allowance:** nothing is blocked; the popup, toast and toolbar
+  tooltip show how far over you are.
 - **Safety caps:** while a visit is open the background re-observes it every
   minute (`tickMinutes`). An unobserved stretch longer than `maxUnobservedMs`
   (3 min; e.g. the machine slept with the site in front) counts only that much.
@@ -38,15 +42,19 @@ Defaults live in `src/shared/config.js`.
   visit history, and the open visit (survives the event page being unloaded).
 - **Visit state machine** (`src/background/visits.js`): tab/window event
   wiring, serialized handling, close vs. focus-away race resolution,
-  navigation/SPA handling, periodic time recording, pause, toolbar badge.
-- **In-page toast** (§5): shows time left (or over) today with Close/Dismiss,
-  five-second auto-hide, reduced-motion aware.
-- **Toolbar badge:** time left today while you're on a watchlisted site
-  (`12m`, `1h05`, `-4m`), in the signal color when ≤ 5 min or over; `⏸` when
-  paused; empty otherwise.
+  navigation/SPA handling, periodic time recording, toolbar indicator.
+- **In-page toast** (§5): a small card with time left (or over) today, a
+  "Close tab" button, a dismiss ×, and "Stop seeing this" (opens settings at
+  the warning toggle); stays up exactly for the grace period, reduced-motion
+  aware.
+- **Toolbar indicator:** the icon gains a small orange dot while time is
+  being counted (a watchlisted site is in front and its grace period is over);
+  hovering the icon shows the time left today.
 - **Popup:** live countdown, used vs. allowance, 10-segment meter, a
-  "counting" indicator, recent visits with durations, pause, clear history /
-  reset today.
+  counting / grace indicator, a 7-day column chart (overage stacked in the
+  signal color, allowance line, hover/focus tooltips, screen-reader table),
+  recent visits with duration bars, and "Clear history" (visit list and
+  earlier days; today is kept).
 - **Options:** daily allowance, site-rule editor, warning toggle, explanation
   and privacy notes.
 
@@ -57,7 +65,7 @@ Defaults live in `src/shared/config.js`.
 3. Open the extension's options, set your allowance and add watchlisted sites —
    adding a site prompts for page access (used for the in-page toast; time is
    counted even if you decline). Then visit the site: the toast shows the time
-   left, the toolbar badge counts down, and the popup shows a live countdown.
+   left, the toolbar icon gets an orange dot once counting starts, and the popup shows a live countdown.
 
 Temporary add-ons are removed when Firefox restarts. Note: after loading, the
 active tab is `about:debugging` — switch to (or open) a watchlisted tab.

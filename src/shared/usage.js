@@ -91,17 +91,9 @@
     return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${pad(m % 60)}m`;
   }
 
-  /** Toolbar badge text (max ~4 chars): "12m", "1h05", "0m", "-4m". */
-  function fmtBadge(remainingMs) {
-    const over = remainingMs < 0;
-    const m = over ? Math.ceil(-remainingMs / 60000) : Math.floor(remainingMs / 60000);
-    const body = m < 60 ? `${m}m` : m < 600 ? `${Math.floor(m / 60)}h${pad(m % 60)}` : `${Math.floor(m / 60)}h`;
-    return over ? `-${body}` : body;
-  }
-
   Vital.usage = {
     dateKey, startOfDay, nextMidnight, observedEnd, creditSpan, prune,
-    usedTodayMs, allowanceMs, fmtClock, fmtShort, fmtBadge,
+    usedTodayMs, allowanceMs, fmtClock, fmtShort,
   };
 
   if (typeof module !== "undefined" && module.exports) module.exports = Vital.usage;

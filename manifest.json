@@ -7,7 +7,10 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "vital@xavaki.local",
-      "strict_min_version": "128.0"
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["none"]
+      }
     }
   },
 
@@ -36,13 +39,9 @@
     "default_title": "Vital",
     "default_popup": "src/popup/popup.html",
     "default_icon": {
-      "16": "icons/icon.svg",
-      "32": "icons/icon.svg"
-    },
-    "theme_icons": [
-      { "light": "icons/icon-light.svg", "dark": "icons/icon.svg", "size": 16 },
-      { "light": "icons/icon-light.svg", "dark": "icons/icon.svg", "size": 32 }
-    ]
+      "16": "icons/logo-16.png",
+      "32": "icons/logo-32.png"
+    }
   },
 
   "options_ui": {
@@ -51,7 +50,8 @@
   },
 
   "icons": {
-    "48": "icons/icon.svg",
-    "96": "icons/icon.svg"
+    "48": "icons/logo-48.png",
+    "96": "icons/logo-96.png",
+    "128": "icons/logo-128.png"
   }
 }

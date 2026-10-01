@@ -3,7 +3,7 @@
  *
  * Tracks the single foreground visit on a watchlisted site and records its
  * foreground time against today's allowance. A visit ends on close,
- * focus-away/navigation, pause, or interruption (browser restart / extension
+ * focus-away/navigation, or interruption (browser restart / extension
  * reload). All tab/window listeners are registered at top level so the event
  * page can wake for them, and state changes are serialized through one promise
  * queue so near-simultaneous events produce exactly one terminal outcome.
@@ -23,9 +23,9 @@
   const { matcher, storage, usage: U, CONFIG } = root.Vital;
   const NONE = browserApi.windows.WINDOW_ID_NONE;
   const TICK_ALARM = "vital-tick";
-  const INK = "#111113";
-  const MUTED = "#55575d";
-  const SIGNAL = "#d9480f";
+  const ICON = { 16: "icons/logo-16.png", 32: "icons/logo-32.png" };
+  // Same logo with an orange dot: shown only while time is being counted.
+  const ICON_COUNTING = { 16: "icons/logo-counting-16.png", 32: "icons/logo-counting-32.png" };
 
   // ---- In-memory state --------------------------------------------------
 
@@ -89,6 +89,13 @@
       visit.countedUntil = at; // visit from an older version: count from now
       return;
     }
+    if (at <= visit.countedUntil) {
+      // Still inside the grace period (countedUntil starts in the future):
+      // nothing to record yet. If the clock jumped back before the visit even
+      // started, re-anchor so counting doesn't stall until it catches up.
+      if (at < visit.startedAt) visit.countedUntil = at;
+      return;
+    }
     const end = U.observedEnd(visit.countedUntil, at);
     if (end > visit.countedUntil) {
       const usage = await storage.getUsage();
@@ -114,7 +121,8 @@
       tabId,
       host,
       startedAt: at,
-      countedUntil: at,
+      // Counting starts after the grace period; until then nothing is recorded.
+      countedUntil: at + CONFIG.graceMs,
       activeMs: 0,
       warningShown: false,
       warningUnavailable: false,
@@ -134,11 +142,14 @@
       const info = {
         remainingMs: await remainingMs(),
         allowanceMs: U.allowanceMs(settingsCache),
+        // The toast lasts exactly the grace period.
+        durationMs: CONFIG.graceMs,
       };
-      // Hand the numbers to the toast (same isolated world), then run it.
+      // Hand the numbers to the toast (content scripts share one global per
+      // frame — `globalThis`, not the page's `window`), then run it.
       await browserApi.scripting.executeScript({
         target: { tabId: visit.tabId },
-        func: (i) => { window.__vitalWarning = i; },
+        func: (i) => { globalThis.__vitalWarning = i; },
         args: [info],
       });
       await browserApi.scripting.executeScript({
@@ -180,34 +191,38 @@
     console.info("Vital:", outcome, visit.host, Math.round((visit.activeMs || 0) / 1000) + "s");
   }
 
-  // ---- Toolbar badge ----------------------------------------------------
-  // Paused: "⏸". On a watchlisted site: time left today ("12m", "-4m").
-  // Otherwise empty.
+  // ---- Toolbar indicator ------------------------------------------------
+  // The icon gains an orange dot while time is being counted: a watchlisted
+  // visit is in front and its grace period is over. The tooltip carries the
+  // time left today. No badge text — it's too small to read.
 
-  async function updateBadge() {
+  let graceTimer = null;
+
+  async function updateIndicator() {
+    if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+    const now = Date.now();
+    const graceLeft = activeVisit && typeof activeVisit.countedUntil === "number"
+      ? activeVisit.countedUntil - now
+      : 0;
+    // Still in grace: switch the dot on the moment counting starts.
+    if (activeVisit && graceLeft > 0) {
+      graceTimer = setTimeout(() => enqueue(updateIndicator), graceLeft + 50);
+    }
+    const counting = !!activeVisit && graceLeft <= 0;
     try {
-      if (settingsCache.paused) {
-        await browserApi.action.setBadgeBackgroundColor({ color: MUTED });
-        await browserApi.action.setBadgeText({ text: "⏸" });
-        await browserApi.action.setTitle({ title: "Vital — paused" });
-        return;
-      }
+      await browserApi.action.setIcon({ path: counting ? ICON_COUNTING : ICON });
       if (!activeVisit) {
-        await browserApi.action.setBadgeText({ text: "" });
         await browserApi.action.setTitle({ title: "Vital" });
         return;
       }
-      const left = await remainingMs();
-      await browserApi.action.setBadgeBackgroundColor({
-        color: left <= CONFIG.lowRemainingMs ? SIGNAL : INK,
-      });
-      await browserApi.action.setBadgeText({ text: U.fmtBadge(left) });
+      const left = await remainingMs(now);
       await browserApi.action.setTitle({
-        title: left >= 0
-          ? `Vital — ${U.fmtShort(left)} left today`
-          : `Vital — ${U.fmtShort(-left)} over today's allowance`,
+        title: (counting ? "Vital — counting · " : "Vital — ")
+          + (left >= 0
+            ? `${U.fmtShort(left)} left today`
+            : `${U.fmtShort(-left)} over today's allowance`),
       });
-    } catch { /* badge is cosmetic */ }
+    } catch { /* indicator is cosmetic */ }
   }
 
   // ---- Reconcile: the single decision point -----------------------------
@@ -216,12 +231,6 @@
     const now = Date.now();
     const changedAt = leftAt !== null ? Math.min(leftAt, now) : now;
     leftAt = null;
-
-    if (settingsCache.paused) {
-      if (activeVisit) await finalize(activeVisit, "paused", now);
-      await updateBadge();
-      return;
-    }
 
     const fg = await getForeground();
     const host = fg ? matcher.hostFromPageUrl(fg.url) : null;
@@ -233,14 +242,14 @@
         // Same visit continues (reload / same-host navigation): record time.
         await record(activeVisit, now);
         await storage.saveOpenVisit(activeVisit);
-        await updateBadge();
+        await updateIndicator();
         return;
       }
       await finalize(activeVisit, sameTab ? "navigated" : "focused_away", changedAt);
     }
 
     if (rule) await startVisit(fg.tabId, host, now);
-    await updateBadge();
+    await updateIndicator();
   }
 
   // ---- Event listeners (top level) --------------------------------------
@@ -268,7 +277,7 @@
         cancelReconcile();
         leftAt = null;
         await finalize(activeVisit, "closed", Date.now());
-        await updateBadge();
+        await updateIndicator();
         // Re-evaluate whatever tab is now in front (may be watchlisted).
         scheduleReconcile();
       }
@@ -286,11 +295,17 @@
     });
   });
 
-  // The toast's "Close tab" button: close the sender's tab, which then ends
-  // the visit exactly like a normal close.
+  // The toast's buttons. "Close tab" closes the sender's tab, which then ends
+  // the visit exactly like a normal close. "Stop seeing this" opens the
+  // settings page scrolled to the in-page warning toggle.
   browserApi.runtime.onMessage.addListener((message, sender) => {
     if (message && message.type === "closeTabFromWarning" && sender.tab) {
       return browserApi.tabs.remove(sender.tab.id).then(() => ({ ok: true }));
+    }
+    if (message && message.type === "openWarningSettings") {
+      return browserApi.tabs
+        .create({ url: browserApi.runtime.getURL("src/options/options.html#feedback") })
+        .then(() => ({ ok: true }));
     }
     return undefined;
   });
@@ -298,13 +313,13 @@
   browserApi.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
     if (changes.rules || changes.settings) {
-      // Watchlist, pause or allowance edited in options/popup.
+      // Watchlist, allowance or warning setting edited in options.
       enqueue(async () => {
         await refreshCaches();
         scheduleReconcile();
       });
     } else if (changes.usage) {
-      enqueue(updateBadge); // e.g. "reset today" from the popup
+      enqueue(updateIndicator); // keep the tooltip's time left current
     }
   });
 
@@ -324,7 +339,7 @@
     }
     const open = await storage.getOpenVisit();
     if (open && open.id && !activeVisit) activeVisit = open;
-    await updateBadge();
+    await updateIndicator();
     scheduleReconcile();
   }
 
@@ -335,7 +350,10 @@
     cancelReconcile();
     const open = activeVisit || (await storage.getOpenVisit());
     if (open && open.id) {
-      const lastSeen = typeof open.countedUntil === "number" ? open.countedUntil : open.startedAt;
+      // countedUntil is in the future while a visit is in its grace period.
+      const lastSeen = typeof open.countedUntil === "number"
+        ? Math.max(open.startedAt, Math.min(open.countedUntil, Date.now()))
+        : open.startedAt;
       await finalize(open, "interrupted", lastSeen, { count: false });
     }
     scheduleReconcile();
@@ -345,8 +363,8 @@
   browserApi.runtime.onInstalled.addListener(() =>
     enqueue(async () => {
       await interruptOpenVisit();
-      // Drop data and alarms left by the earlier points-based versions.
-      await storage.removeLegacyKeys();
+      // Drop data, settings and alarms left by earlier versions.
+      await storage.migrateLegacyData();
       try {
         for (const a of await browserApi.alarms.getAll()) {
           if (a.name.startsWith("vital-linger:")) await browserApi.alarms.clear(a.name);

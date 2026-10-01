@@ -311,6 +311,11 @@
   els.allowance.max = CONFIG.maxAllowanceMin;
   els.allowance.addEventListener("change", onAllowanceChange);
 
+  // Fill config-derived numbers in the copy so it can't drift.
+  document.querySelectorAll(".cfg-grace").forEach((el) => {
+    el.textContent = CONFIG.graceMs / 1000;
+  });
+
   loadRules();
   loadSettings();
 })();

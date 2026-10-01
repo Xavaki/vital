@@ -1,7 +1,7 @@
 # Build / package artifacts
 *.zip
 *.xpi
-web-ext-artifacts/
+web-ext-artifacts/*
 
 # Dependencies (none in MVP, but guard against future tooling)
 node_modules/

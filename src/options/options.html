@@ -5,19 +5,15 @@
   <meta name="color-scheme" content="light dark" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Vital — Settings</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="../../icons/logo-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="../../icons/logo-16.png" />
   <link rel="stylesheet" href="options.css" />
 </head>
 <body>
   <main class="wrap">
     <header class="head">
       <h1>
-        <svg class="mark" viewBox="0 0 16 16" aria-hidden="true">
-          <rect x="1.25" y="4.25" width="11.5" height="7.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          <rect x="13.25" y="6.5" width="1.5" height="3" rx="0.5" fill="currentColor"/>
-          <rect x="3" y="6" width="2.25" height="4" fill="currentColor"/>
-          <rect x="5.9" y="6" width="2.25" height="4" fill="currentColor"/>
-          <rect x="8.8" y="6" width="2.25" height="4" fill="currentColor"/>
-        </svg>
+<img class="mark" src="../../icons/logo-96.png" alt="" width="40" height="40" />
         Vital
       </h1>
       <p class="tagline">A daily time allowance for distracting sites. Only time with the site in front counts. Nothing is ever blocked.</p>
@@ -75,13 +71,13 @@
     </section>
 
     <!-- Feedback settings --------------------------------------------- -->
-    <section class="card" aria-labelledby="feedback-h">
+    <section id="feedback" class="card" aria-labelledby="feedback-h">
       <h2 id="feedback-h">Feedback</h2>
       <label class="toggle-row">
         <input id="warning-toggle" type="checkbox" />
         <span>
           <strong>In-page warning</strong>
-          <small>A small, dismissible toast asking if you want to close the tab. Auto-hides after five seconds.</small>
+          <small>A small, dismissible toast showing today's time left, with a Close tab button. Stays up for the <span class="cfg-grace"></span>-second grace period.</small>
         </span>
       </label>
     </section>
@@ -96,9 +92,15 @@
         costs nothing.
       </p>
       <p class="help">
+        The first <strong><span class="cfg-grace"></span> seconds</strong> of
+        every visit are free, so closing a tab you opened out of habit costs
+        nothing. Counting starts when the in-page warning disappears.
+      </p>
+      <p class="help">
         Every counted second comes off today's allowance, which resets at
-        midnight. Running out blocks nothing; the toolbar badge and popup just
-        show how far over you are.
+        midnight. Running out blocks nothing; the popup just shows how far
+        over you are. While time is being counted, the toolbar icon shows a
+        small orange dot.
       </p>
     </section>
 

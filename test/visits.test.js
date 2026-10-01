@@ -55,6 +55,7 @@ function makeBrowser(store, world) {
         return world.tabs.filter((t) => t.windowId === windowId && (!active || t.active)).map((t) => ({ ...t }));
       },
       async remove() {},
+      async create({ url }) { world.opened.push(url); return { id: 99 }; },
     },
     windows: {
       WINDOW_ID_NONE: -1,
@@ -67,13 +68,21 @@ function makeBrowser(store, world) {
       async clear(name) { delete world.alarms[name]; },
       async getAll() { return Object.keys(world.alarms).map((name) => ({ name })); },
     },
-    scripting: { async executeScript(opts) { world.injected.push(opts.files ? "file" : "info"); return []; } },
-    action: {
-      async setBadgeText({ text }) { world.badge.text = text; },
-      async setBadgeBackgroundColor({ color }) { world.badge.color = color; },
-      async setTitle({ title }) { world.badge.title = title; },
+    scripting: {
+      async executeScript(opts) {
+        world.injected.push(opts.files ? "file" : "info");
+        if (opts.args) world.toastInfo = opts.args[0];
+        return [];
+      },
     },
-    runtime: { onMessage: makeEvent(), onStartup: makeEvent(), onInstalled: makeEvent() },
+    action: {
+      async setIcon({ path }) { world.toolbar.counting = /counting/.test(path[16]); },
+      async setTitle({ title }) { world.toolbar.title = title; },
+    },
+    runtime: {
+      onMessage: makeEvent(), onStartup: makeEvent(), onInstalled: makeEvent(),
+      getURL: (path) => `moz-extension://vital/${path}`,
+    },
   };
   return b;
 }
@@ -95,7 +104,8 @@ function freshWorld() {
     focusedWindow: 1,
     alarms: {},
     injected: [],
-    badge: {},
+    opened: [],
+    toolbar: {},
     tabs: [
       { id: 10, windowId: 1, active: true, url: "https://web.whatsapp.com/" },
       { id: 11, windowId: 1, active: false, url: "https://example.org/" },
@@ -105,7 +115,7 @@ function freshWorld() {
 function freshStore(extra = {}) {
   return {
     rules: [{ id: "r1", host: "web.whatsapp.com", includeSubdomains: true, enabled: true }],
-    settings: { paused: false, warningEnabled: true, dailyAllowanceMin: 30 },
+    settings: { warningEnabled: true, dailyAllowanceMin: 30 },
     ...extra,
   };
 }
@@ -128,9 +138,10 @@ const lastVisit = (store) => (store.visits || []).at(-1);
 const todayKey = () => globalThis.Vital.usage.dateKey(Date.now());
 const usedToday = (store) => (store.usage && store.usage[todayKey()]) || 0;
 const near = (actual, expected, tol = 2000) => Math.abs(actual - expected) <= tol;
+const GRACE = () => globalThis.Vital.CONFIG.graceMs;
 
 (async () => {
-  // A. Visit starts in front; a quick close records its (short) time.
+  // A. Visit starts in front; a close inside the grace period costs nothing.
   {
     const store = freshStore(), world = freshWorld();
     const b = boot(store, world);
@@ -138,12 +149,13 @@ const near = (actual, expected, tol = 2000) => Math.abs(actual - expected) <= to
     ok(store.openVisit && store.openVisit.host === "web.whatsapp.com", "A: visit starts on foreground watchlisted tab");
     ok(world.alarms["vital-tick"], "A: tick alarm running during the visit");
     ok(world.injected.join() === "info,file", "A: toast gets its numbers, then is injected");
+    ok(world.toastInfo && world.toastInfo.durationMs === GRACE(), "A: toast lasts exactly the grace period");
     closeTab(world, b, 10);
     await sleep(SETTLE);
     ok(lastVisit(store).outcome === "closed", "A: outcome closed");
-    ok(usedToday(store) > 0 && usedToday(store) < 2000, `A: short visit records its time (${usedToday(store)}ms)`);
+    ok(usedToday(store) === 0 && lastVisit(store).activeMs === 0, `A: close within grace records nothing (${usedToday(store)}ms)`);
     ok(!store.openVisit && !world.alarms["vital-tick"], "A: no open visit, tick stopped");
-    ok(world.badge.text === "", "A: badge cleared off-site");
+    ok(world.toolbar.counting === false && world.toolbar.title === "Vital", "A: no counting dot off-site");
   }
 
   // B. Close after the event page was unloaded: all foreground time counts.
@@ -156,11 +168,11 @@ const near = (actual, expected, tol = 2000) => Math.abs(actual - expected) <= to
     closeTab(world, b2, 10);
     await sleep(SETTLE);
     ok(lastVisit(store).outcome === "closed", `B: close after wake is 'closed' (got ${lastVisit(store).outcome})`);
-    ok(near(usedToday(store), 2 * M), `B: 2 min in front → 2 min used (${usedToday(store)}ms)`);
-    ok(near(lastVisit(store).activeMs, 2 * M), "B: visit duration matches");
+    ok(near(usedToday(store), 2 * M - GRACE()), `B: 2 min in front → 2 min minus grace used (${usedToday(store)}ms)`);
+    ok(near(lastVisit(store).activeMs, 2 * M - GRACE()), "B: visit duration matches");
   }
 
-  // C. The periodic tick records time while the visit stays open, and the badge counts down.
+  // C. The periodic tick records time while the visit stays open, and the toolbar shows it's counting.
   {
     const store = freshStore(), world = freshWorld();
     boot(store, world);
@@ -170,9 +182,10 @@ const near = (actual, expected, tol = 2000) => Math.abs(actual - expected) <= to
     await sleep(SETTLE);
     b2.alarms.onAlarm.fire({ name: "vital-tick" });
     await sleep(SETTLE);
-    ok(near(usedToday(store), 1 * M), `C: tick records 1 min (${usedToday(store)}ms)`);
+    ok(near(usedToday(store), 1 * M - GRACE()), `C: tick records 1 min minus grace (${usedToday(store)}ms)`);
     ok(store.openVisit && near(store.openVisit.countedUntil, Date.now()), "C: visit still open, recorded up to now");
-    ok(world.badge.text === "28m" || world.badge.text === "29m", `C: badge shows time left (${world.badge.text})`);
+    ok(world.toolbar.counting === true, "C: counting dot on once grace is over");
+    ok(/(28|29)m left today/.test(world.toolbar.title), `C: tooltip shows time left (${world.toolbar.title})`);
   }
 
   // D. Switching tabs stops the clock; closing the background tab later adds nothing.
@@ -187,7 +200,7 @@ const near = (actual, expected, tol = 2000) => Math.abs(actual - expected) <= to
     await sleep(SETTLE);
     ok(lastVisit(store).outcome === "focused_away", "D: switching away ends the visit");
     const afterSwitch = usedToday(store);
-    ok(near(afterSwitch, 3 * M), `D: foreground time recorded (${afterSwitch}ms)`);
+    ok(near(afterSwitch, 3 * M - GRACE()), `D: foreground time recorded (${afterSwitch}ms)`);
     await sleep(600);
     closeTab(world, b2, 10);
     await sleep(SETTLE);
@@ -256,31 +269,29 @@ const near = (actual, expected, tol = 2000) => Math.abs(actual - expected) <= to
     ok(store.visits.length === 1, `H: exactly one terminal outcome (${store.visits.length})`);
   }
 
-  // I. Pausing ends the visit and stops counting; badge shows paused.
+  // I. Pause was removed: a leftover `paused: true` setting must not stop
+  //    counting (there's no longer any way to unpause).
   {
     const store = freshStore(), world = freshWorld();
+    store.settings.paused = true;
     boot(store, world);
     await sleep(SETTLE);
-    await globalThis.browser.storage.local.set({ settings: { ...store.settings, paused: true } });
-    await sleep(SETTLE);
-    ok(lastVisit(store).outcome === "paused" && !store.openVisit, "I: pause ends the visit");
-    ok(world.badge.text === "⏸", "I: paused badge");
+    ok(store.openVisit && store.openVisit.host === "web.whatsapp.com", "I: legacy paused setting is ignored");
+    ok(/left today/.test(world.toolbar.title), `I: tooltip shows time, not paused (${world.toolbar.title})`);
   }
 
-  // J. Badge reflects today's usage and turns to the signal color when low/over.
+  // J. Tooltip reflects today's usage, including time over the allowance.
   {
     const key = globalThis.Vital.usage.dateKey(Date.now());
     let store = freshStore({ usage: { [key]: 20 * M } }), world = freshWorld();
     boot(store, world);
     await sleep(SETTLE);
-    ok(world.badge.text === "9m" || world.badge.text === "10m", `J: 20 of 30 min used → ~10m (${world.badge.text})`);
-    ok(world.badge.color === "#111113", "J: neutral badge with time to spare");
+    ok(/(9|10)m left today/.test(world.toolbar.title), `J: 20 of 30 min used → ~10m (${world.toolbar.title})`);
 
     store = freshStore({ usage: { [key]: 35 * M } }); world = freshWorld();
     boot(store, world);
     await sleep(SETTLE);
-    ok(world.badge.text === "-5m" || world.badge.text === "-6m", `J: over allowance → negative (${world.badge.text})`);
-    ok(world.badge.color === "#d9480f", "J: signal color when over");
+    ok(/(5|6)m over today's allowance/.test(world.toolbar.title), `J: over allowance (${world.toolbar.title})`);
   }
 
   // K. Raising the allowance applies immediately.
@@ -291,18 +302,90 @@ const near = (actual, expected, tol = 2000) => Math.abs(actual - expected) <= to
     await sleep(SETTLE);
     await globalThis.browser.storage.local.set({ settings: { ...store.settings, dailyAllowanceMin: 60 } });
     await sleep(SETTLE);
-    ok(world.badge.text === "24m" || world.badge.text === "25m", `K: 35 of 60 min → ~25m left (${world.badge.text})`);
+    ok(/(24|25)m left today/.test(world.toolbar.title), `K: 35 of 60 min → ~25m left (${world.toolbar.title})`);
   }
 
-  // L. Update/reload drops data from the points-based versions.
+  // L. Update/reload drops data, settings and alarms from earlier versions.
   {
     const store = freshStore({ ledger: [1], scoreState: {}, balance: 5 }), world = freshWorld();
+    store.settings.paused = true;
     world.alarms["vital-linger:old"] = {};
     const b = boot(store, world);
     b.runtime.onInstalled.fire({ reason: "update" });
     await sleep(SETTLE);
     ok(!("ledger" in store) && !("scoreState" in store) && !("balance" in store), "L: legacy keys removed");
+    ok(!("paused" in store.settings) && store.settings.dailyAllowanceMin === 30, "L: legacy paused setting dropped, others kept");
     ok(!world.alarms["vital-linger:old"], "L: legacy alarms cleared");
+  }
+
+  // N. Clear history drops the visit list and earlier days, never today.
+  {
+    const today = globalThis.Vital.usage.dateKey(Date.now());
+    const yesterday = globalThis.Vital.usage.dateKey(Date.now() - 24 * 60 * M);
+    const store = freshStore({
+      usage: { [today]: 7 * M, [yesterday]: 40 * M },
+      visits: [{ id: "old", host: "web.whatsapp.com", startedAt: 1, endedAt: 2, activeMs: 1, outcome: "closed" }],
+    });
+    const world = freshWorld();
+    world.tabs = []; // nothing in front, so no visit gets recorded meanwhile
+    boot(store, world);
+    await sleep(SETTLE);
+    await globalThis.Vital.storage.clearHistory();
+    ok(store.visits.length === 0, "N: visit list cleared");
+    ok(store.usage[today] === 7 * M && !(yesterday in store.usage), "N: earlier days dropped, today kept");
+  }
+
+  // M. Grace period boundaries.
+  {
+    // Leave at 3s (inside grace): nothing counts.
+    let store = freshStore(), world = freshWorld();
+    boot(store, world);
+    await sleep(SETTLE);
+    backdate(store, 3000);
+    let b2 = boot(store, world);
+    closeTab(world, b2, 10);
+    await sleep(SETTLE);
+    ok(usedToday(store) === 0, `M: closed at 3s → nothing counted (${usedToday(store)}ms)`);
+
+    // Leave at 10s: only the time after the grace period counts.
+    store = freshStore(); world = freshWorld();
+    boot(store, world);
+    await sleep(SETTLE);
+    backdate(store, 10000);
+    b2 = boot(store, world);
+    closeTab(world, b2, 10);
+    await sleep(SETTLE);
+    ok(near(usedToday(store), 10000 - GRACE(), 1000), `M: closed at 10s → ~6s counted (${usedToday(store)}ms)`);
+
+    // A tick or event during grace doesn't pull counting forward.
+    store = freshStore(); world = freshWorld();
+    b2 = boot(store, world);
+    await sleep(SETTLE);
+    const graceEnds = store.openVisit.startedAt + GRACE();
+    b2.alarms.onAlarm.fire({ name: "vital-tick" });
+    await sleep(SETTLE);
+    ok(store.openVisit.countedUntil === graceEnds && usedToday(store) === 0, "M: tick during grace keeps the grace window intact");
+    ok(world.toolbar.counting === false, "M: no counting dot during grace");
+
+    // Browser restart during grace: interrupted visit doesn't end in the future.
+    const before = Date.now();
+    b2 = boot(store, world);
+    b2.runtime.onStartup.fire();
+    await sleep(SETTLE);
+    const interrupted = store.visits.find((v) => v.outcome === "interrupted");
+    ok(interrupted && interrupted.endedAt <= Date.now() && interrupted.endedAt >= interrupted.startedAt,
+      `M: interrupted-in-grace visit ends in the past (${interrupted && interrupted.endedAt - before}ms)`);
+  }
+
+  // N. The toast's "Stop seeing this" opens settings at the warning toggle.
+  {
+    const store = freshStore(), world = freshWorld();
+    const b = boot(store, world);
+    await sleep(SETTLE);
+    const [reply] = b.runtime.onMessage.fire({ type: "openWarningSettings" }, { tab: { id: 10 } });
+    ok((await reply).ok === true, "N: background confirms");
+    ok(world.opened.length === 1 && world.opened[0].endsWith("src/options/options.html#feedback"),
+      `N: settings opened at the warning toggle (${world.opened})`);
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);

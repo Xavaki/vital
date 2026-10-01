@@ -3,21 +3,30 @@
  *
  * Injected on demand when a watchlisted visit starts. Renders a small,
  * dismissible toast in the top-right corner inside a shadow root so page styles
- * can't touch it and it can't touch the page. Auto-hides after five seconds.
- * Never traps focus, intercepts typing, covers the page, or plays sound.
+ * can't touch it and it can't touch the page. Auto-hides when the visit's grace
+ * period ends. Never traps focus, intercepts typing, covers the page, or plays
+ * sound.
  *
- * The background sets `window.__vitalWarning = { remainingMs, allowanceMs }`
- * (same isolated world) just before injecting this file. "Close tab" asks the
- * background to remove the tab, which ends the visit like a normal close.
+ * The background sets
+ * `globalThis.__vitalWarning = { remainingMs, allowanceMs, durationMs }`
+ * just before injecting this file. "Close tab" asks the background to remove
+ * the tab, which ends the visit like a normal close. "Stop seeing this" asks it
+ * to open the settings page at the in-page warning toggle.
+ *
+ * Use `globalThis`, not `window`: in Firefox content scripts the global is a
+ * separate object inheriting from the page's `window`, and the extension APIs
+ * (`browser`) live only on it — `window.browser` is undefined.
  */
 (function () {
   "use strict";
 
-  const browserApi = window.browser || window.chrome;
-  const AUTO_HIDE_MS = 5000;
+  const browserApi = globalThis.browser || globalThis.chrome;
   const HOST_ID = "vital-warning-host";
-  const info = window.__vitalWarning || null;
-  delete window.__vitalWarning;
+  const info = globalThis.__vitalWarning || null;
+  delete globalThis.__vitalWarning;
+  // Lasts exactly the visit's grace period (sent by the background), so the
+  // draining bar runs out when time starts counting.
+  const AUTO_HIDE_MS = (info && info.durationMs) || 4000;
 
   function fmtMinutes(ms) {
     const m = Math.floor(ms / 60000);
@@ -40,53 +49,75 @@
   const reduceMotion =
     window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  const SANS = `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`;
   const style = document.createElement("style");
   style.textContent = `
     :host { all: initial; }
-    /* Always dark ink so it stays legible on any page; orange edge = Vital. */
+    /* Small and quiet: a translucent near-black navy card with a faint blue
+       glow, so it stays legible on any page without shouting. Gradients only
+       (no images), so page CSPs can't strip it. */
     .toast {
-      position: fixed; top: 16px; right: 16px;
-      width: 300px;
-      font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: #111113; color: #ededee;
-      border: 1px solid #2c2c30;
-      border-left: 3px solid #ff7a3d;
-      border-radius: 2px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-      padding: 12px 14px 0;
+      position: fixed; top: 12px; right: 12px;
+      width: 248px;
+      font: 12.5px/1.4 ${SANS};
+      color: #eef0ff;
+      background:
+        radial-gradient(160px 90px at 0% 100%, rgba(0,87,251,0.30), transparent),
+        rgba(1,4,26,0.88);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(6,206,252,0.14);
+      border-radius: 16px;
+      box-shadow: 0 6px 20px rgba(1,4,26,0.22);
+      padding: 10px 12px 0;
       overflow: hidden;
-      ${reduceMotion ? "" : "animation: vital-in 140ms ease-out;"}
+      ${reduceMotion ? "" : "animation: vital-in 220ms ease-out;"}
     }
     @keyframes vital-in {
-      from { opacity: 0; transform: translateX(8px); }
-      to   { opacity: 1; transform: translateX(0); }
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: none; }
     }
-    .eyebrow {
-      margin: 0 0 6px;
-      font: 500 10.5px/1 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-      letter-spacing: 0.1em; text-transform: uppercase; color: #8b8d93;
+    .head { display: flex; align-items: center; gap: 8px; }
+    /* The logo's two colours, as a tiny mark. */
+    .mark {
+      flex: none; width: 8px; height: 8px; border-radius: 50%;
+      background: linear-gradient(135deg, #06cefc, #0057fb 55%, #fc581d);
     }
     .left {
-      margin: 0 0 4px;
-      font: 600 20px/1.2 ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
-      letter-spacing: -0.01em;
+      flex: 1; margin: 0;
+      font: 500 13.5px/1.3 ${SANS};
+      font-variant-numeric: tabular-nums;
     }
-    .left.over { color: #ff7a3d; }
-    .msg { margin: 0 0 12px; color: #a1a1a8; }
-    .row { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 12px; }
-    button {
-      font: 600 12.5px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      cursor: pointer; border-radius: 2px; padding: 7px 12px;
+    .left.over { color: #ff6f3a; }
+    .x {
+      flex: none; width: 22px; height: 22px; padding: 0; margin: -3px -5px -3px 0;
+      display: grid; place-items: center;
+      background: transparent; border: none; border-radius: 50%;
+      color: #8fa0dc; font: 400 16px/1 ${SANS};
     }
-    .close { background: #ededee; color: #111113; border: 1px solid #ededee; }
-    .close:hover { background: #ffffff; }
-    .dismiss { background: transparent; color: #a1a1a8; border: 1px solid #3a3a40; }
-    .dismiss:hover { color: #ededee; border-color: #6e6e76; }
-    button:focus-visible { outline: 2px solid #ff7a3d; outline-offset: 2px; }
-    /* Hairline showing time until auto-hide. */
-    .timer { height: 2px; margin: 0 -14px; background: #2c2c30; }
+    .x:hover { color: #ffffff; background: rgba(157,176,255,0.12); }
+    .msg { margin: 6px 0 0; color: #b4bce6; font-size: 12px; }
+    .msg.error { color: #ff6f3a; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 9px 0 10px; }
+    button { cursor: pointer; transition: background 0.15s, color 0.15s; }
+    .close {
+      font: 600 12px/1 ${SANS};
+      padding: 6px 12px; border-radius: 999px;
+      background: #ffffff; color: #030c3d; border: none;
+    }
+    .close:hover { background: #dcecff; }
+    .stop {
+      font: 500 11.5px/1 ${SANS};
+      padding: 4px 0; background: none; border: none; color: #8fa0dc;
+      text-decoration: underline; text-decoration-color: rgba(143,160,220,0.4); text-underline-offset: 3px;
+    }
+    .stop:hover { color: #eef0ff; text-decoration-color: currentColor; }
+    button:focus-visible { outline: 2px solid #fcc32d; outline-offset: 2px; }
+    button:disabled { opacity: 0.6; cursor: default; }
+    /* Thin line showing time until auto-hide. */
+    .timer { height: 2px; margin: 0 -12px; background: rgba(157,176,255,0.10); }
     .timer span {
-      display: block; height: 100%; background: #6e6e76; transform-origin: left;
+      display: block; height: 100%; transform-origin: left;
+      background: linear-gradient(90deg, #0057fb, #06cefc);
       ${reduceMotion ? "" : `animation: vital-drain ${AUTO_HIDE_MS}ms linear forwards;`}
     }
     @keyframes vital-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
@@ -97,9 +128,11 @@
   toast.setAttribute("role", "alertdialog");
   toast.setAttribute("aria-label", "Vital reminder");
 
-  const eyebrow = document.createElement("p");
-  eyebrow.className = "eyebrow";
-  eyebrow.textContent = "Vital \u00B7 watchlisted site"; // escaped: host page charset can vary
+  const head = document.createElement("div");
+  head.className = "head";
+  const mark = document.createElement("span");
+  mark.className = "mark";
+  mark.setAttribute("aria-hidden", "true");
 
   // Headline: time left today (or how far over), when the background supplied it.
   const left = document.createElement("p");
@@ -114,31 +147,39 @@
         : `${fmtMinutes(-info.remainingMs)} over today`;
     }
   } else {
-    left.hidden = true;
+    left.textContent = "Watchlisted site";
   }
 
+  const dismissBtn = document.createElement("button");
+  dismissBtn.className = "x";
+  dismissBtn.type = "button";
+  dismissBtn.setAttribute("aria-label", "Dismiss");
+  dismissBtn.textContent = "\u00D7"; // escaped: host page charset can vary
+  head.append(mark, left, dismissBtn);
+
+  // Only used to report a failed "Close tab".
   const msg = document.createElement("p");
   msg.className = "msg";
-  msg.textContent = "Time on this tab counts against your daily allowance. Close it?";
+  msg.hidden = true;
 
   const row = document.createElement("div");
   row.className = "row";
 
-  const dismissBtn = document.createElement("button");
-  dismissBtn.className = "dismiss";
-  dismissBtn.type = "button";
-  dismissBtn.textContent = "Dismiss";
+  const stopBtn = document.createElement("button");
+  stopBtn.className = "stop";
+  stopBtn.type = "button";
+  stopBtn.textContent = "Stop seeing this";
 
   const closeBtn = document.createElement("button");
   closeBtn.className = "close";
   closeBtn.type = "button";
   closeBtn.textContent = "Close tab";
 
-  row.append(dismissBtn, closeBtn);
+  row.append(stopBtn, closeBtn);
   const timer = document.createElement("div");
   timer.className = "timer";
   timer.append(document.createElement("span"));
-  toast.append(eyebrow, left, msg, row, timer);
+  toast.append(head, msg, row, timer);
   shadow.append(style, toast);
   document.documentElement.appendChild(host);
 
@@ -152,13 +193,36 @@
   hideTimer = setTimeout(teardown, AUTO_HIDE_MS);
 
   dismissBtn.addEventListener("click", teardown);
-  closeBtn.addEventListener("click", () => {
+
+  // Open the settings page at the in-page warning toggle (content scripts
+  // can't open extension pages themselves, so the background does it).
+  stopBtn.addEventListener("click", () => {
     teardown();
+    browserApi.runtime.sendMessage({ type: "openWarningSettings" }).catch((e) => {
+      console.warn("Vital: couldn't open settings", e);
+    });
+  });
+
+  // Ask the background to close this tab. Keep the toast up until that works:
+  // on success the tab (and toast) disappear; on failure say so rather than
+  // vanishing silently. (window.close() is no fallback — Firefox ignores it
+  // for tabs the user opened.)
+  closeBtn.addEventListener("click", async () => {
+    clearTimeout(hideTimer);
+    timer.hidden = true;
+    closeBtn.disabled = true;
+    closeBtn.textContent = "Closing\u2026";
     try {
-      browserApi.runtime.sendMessage({ type: "closeTabFromWarning" });
+      const reply = await browserApi.runtime.sendMessage({ type: "closeTabFromWarning" });
+      if (!reply || !reply.ok) throw new Error("no confirmation from Vital");
     } catch (e) {
-      // If messaging fails, fall back to closing via window (best effort).
-      window.close();
+      if (!host.isConnected) return; // page already going away
+      console.warn("Vital: couldn't close the tab", e);
+      closeBtn.hidden = true;
+      msg.hidden = false;
+      msg.classList.add("error");
+      msg.textContent = "Couldn't close this tab \u2014 close it yourself (Ctrl+W).";
+      hideTimer = setTimeout(teardown, AUTO_HIDE_MS * 2);
     }
   });
 })();

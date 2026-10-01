@@ -20,17 +20,19 @@
     maxAllowanceMin: 24 * 60,
 
     // While a visit is open the background re-observes it this often, recording
-    // time and refreshing the badge.
+    // time and refreshing the toolbar tooltip.
     tickMinutes: 1,
     // Longest stretch counted without an observation (covers a missed tick; caps
     // time counted across sleep/suspend).
     maxUnobservedMs: 3 * 60 * 1000,
 
-    // Badge turns to the signal color when this little time is left.
+    // The popup readout turns to the signal color when this little time is left.
     lowRemainingMs: 5 * 60 * 1000,
 
-    // In-page warning auto-hide.
-    warningAutoHideMs: 5 * 1000,
+    // The first seconds of every visit are free, so closing a tab opened by
+    // reflex costs nothing. The in-page toast stays up for exactly this long:
+    // its bar runs out when counting starts.
+    graceMs: 4 * 1000,
 
     // How long to keep visit history and per-day usage.
     detailRetentionDays: 30,

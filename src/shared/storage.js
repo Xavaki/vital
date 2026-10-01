@@ -28,9 +28,10 @@
 
   // Keys written by earlier versions (points/penalties); removed on update.
   const LEGACY_KEYS = ["ledger", "scoreState", "balance"];
+  // Settings fields from earlier versions (pause was removed); dropped on update.
+  const LEGACY_SETTINGS = ["paused"];
 
   const DEFAULT_SETTINGS = Object.freeze({
-    paused: false,
     warningEnabled: true,
     dailyAllowanceMin: Vital.CONFIG.defaultAllowanceMin,
   });
@@ -172,24 +173,32 @@
     await set({ [KEYS.openVisit]: null });
   }
 
-  // ---- History / reset / migration --------------------------------------
+  // ---- History / migration ----------------------------------------------
 
-  /** Delete the visit list; today's time and the watchlist stay. */
+  /**
+   * Delete the visit list and earlier days' totals. Today's total stays, so
+   * clearing history is never a way to reset today's allowance.
+   */
   async function clearHistory() {
-    await set({ [KEYS.visits]: [] });
-    return { ok: true };
-  }
-
-  /** Forget the time used today (the open visit keeps counting from now). */
-  async function resetToday() {
+    const today = Vital.usage.dateKey(Date.now());
     const usage = await getUsage();
-    delete usage[Vital.usage.dateKey(Date.now())];
-    await saveUsage(usage);
+    await set({
+      [KEYS.visits]: [],
+      [KEYS.usage]: today in usage ? { [today]: usage[today] } : {},
+    });
     return { ok: true };
   }
 
-  async function removeLegacyKeys() {
+  /** Remove data and settings fields left by earlier versions. */
+  async function migrateLegacyData() {
     await api().storage.local.remove(LEGACY_KEYS);
+    const data = await get(KEYS.settings);
+    const stored = data[KEYS.settings];
+    if (stored && LEGACY_SETTINGS.some((k) => k in stored)) {
+      const next = { ...stored };
+      for (const k of LEGACY_SETTINGS) delete next[k];
+      await set({ [KEYS.settings]: next });
+    }
   }
 
   Vital.storage = {
@@ -212,7 +221,6 @@
     saveOpenVisit,
     clearOpenVisit,
     clearHistory,
-    resetToday,
-    removeLegacyKeys,
+    migrateLegacyData,
   };
 })(typeof globalThis !== "undefined" ? globalThis : this);

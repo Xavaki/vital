@@ -49,6 +49,7 @@ eq(
   "live span is capped like recorded time"
 );
 eq(U.usedTodayMs({}, { host: "legacy" }, at(29, 9)), 0, "open visit without countedUntil adds nothing");
+eq(U.usedTodayMs(usage, { countedUntil: at(29, 12, 0, 4) }, at(29, 12, 0, 2)), 10 * M, "grace period (countedUntil ahead) adds nothing");
 
 // --- prune ---
 const pruned = U.prune({ "2026-07-01": 1, "2026-09-20": 2, "2026-09-29": 3 }, at(29, 12));
@@ -65,13 +66,6 @@ eq(U.fmtClock(-4 * M - 12 * S), "−4:12", "fmtClock negative");
 eq(U.fmtShort(45 * S), "45s", "fmtShort seconds");
 eq(U.fmtShort(12 * M + 40 * S), "12m", "fmtShort minutes");
 eq(U.fmtShort(65 * M), "1h 05m", "fmtShort hours");
-eq(U.fmtBadge(12.5 * M), "12m", "badge rounds down while time is left");
-eq(U.fmtBadge(30 * S), "0m", "badge under a minute left");
-eq(U.fmtBadge(65 * M), "1h05", "badge over an hour");
-eq(U.fmtBadge(700 * M), "11h", "badge 10h+ drops minutes");
-eq(U.fmtBadge(-30 * S), "-1m", "badge rounds overage up");
-eq(U.fmtBadge(-4 * M), "-4m", "badge over allowance");
-ok(["12m", "1h05", "-4m", "11h", "-1h05"].every((t) => t.length <= 5), "badge text stays short");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
